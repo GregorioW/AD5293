@@ -7,7 +7,7 @@
  *	\pre	Therefore, use of <b>SPI</b> library is needed.
  *
  *	\date	Created: 30.11.2016 18:43:23
- *  \author	Grzegorz Wielgoszewski \<Nanometrologia@Wielgoszewski.pl\>
+ *  \author	Grzegorz Wielgoszewski \<Arduino@Wielgoszewski.pl\>
  */
 
 #include "AD5293.h"

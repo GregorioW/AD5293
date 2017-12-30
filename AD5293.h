@@ -7,7 +7,7 @@
  *	\pre	Therefore, use of <b>SPI</b> library is needed.
  *
  *	\date	Created: 30.11.2016 18:43:23
- *  \author	Grzegorz Wielgoszewski \<Nanometrologia@Wielgoszewski.pl\>
+ *  \author	Grzegorz Wielgoszewski \<Arduino@Wielgoszewski.pl\>
  */
 
 #ifndef _AD5293_h
@@ -104,8 +104,8 @@ void setReadyPin(uint8_t pinRDY);
  *
  *	\param	pinRST	<tt>!RESET</tt> pin number (Arduino pin).
  *
- *	\note	Software <tt>!RESET</tt> may be considered optional in many designs, therefore this functionality requires a suitable board - one of Arduino digital pins needs to be connected to the <tt>!RESET</tt> pin of AD5293.
- *	\note	In DD00511A, <tt>!RESET</tt> pins of both potentiometers and the D/A converter are connected and driven from the same Arduino pin.
+ *	\note	Software <tt>!RESET</tt> may be considered optional in many designs, 
+ *	\note	therefore this functionality requires a suitable board - one of Arduino digital pins needs to be connected to the <tt>!RESET</tt> pin of AD5293.
  */
 void setResetPin(uint8_t pinRST);
 
@@ -120,9 +120,6 @@ boolean isReady();
 
 /*!
  *	\brief	Performs hardware reset.
- *
- *	\note	In DD00511A, reset pins of both potentiometers and the D/A converter are connected and driven from the same Arduino pin.
- *	\note	In DD00521A, reset pins of all potentiometers are driven via logic inverters from a single Arduino/Genuino Micro pin.
  */
 void reset();
 
