@@ -15,15 +15,15 @@
 /*!
  *	\details	Calls the #begin() function for bipolar reference voltage - repeats \a refVoltage as negative and positive value.
  */
-enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltage) {
-	return this->begin(pinCS, -refVoltage, refVoltage);
+enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltage, SPIConnectionMode connMode = CONN_PARALLEL) {
+	return this->begin(pinCS, -refVoltage, refVoltage, connMode);
 };
 
 /*!
  *	\details	Assigns Arduino pin for SPI operation of the AD5293 and sets the voltages for potentiometer input (used in output calculations).
  *				SPI parameters (#m_commSettings) are also set within this function.
  */
-enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltageBottom, float refVoltageTop) {
+enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltageBottom, float refVoltageTop, SPIConnectionMode connMode = CONN_PARALLEL) {
 	this->m_bits = 10;
 	
 	this->m_pinCS = pinCS;
@@ -35,25 +35,35 @@ enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltageBottom, float
 	digitalWrite(this->m_pinCS, HIGH);
 	
 	this->m_commSettings = new SPISettings(500000, MSBFIRST, SPI_MODE1);
+	this->m_connMode = connMode;
+
+	this->chainedDevices += 1;
 
 	this->placeSDOinHighZ();
+
+	return STATUS_OK;
 };
 
 /*!
- *	\details	Assigns Arduino pin for identification of read/write completion.
+ *	\details	
  */
-void AD5293Class::setReadyPin(uint8_t pinRDY) {
-	this->m_pinRDY = pinRDY;
-	
-	// By default, the device is ready -> pull up.
-	pinMode(this->m_pinRDY, INPUT_PULLUP);
-}
+enum status_code AD5293Class::configureChain(uint8_t chainNo, AD5293Class* prevADC, AD5293Class* nextADC) {
+	this->m_chainOrder = chainNo;
+	this->previousADC = prevADC;
+	this->nextADC = nextADC;
+
+	// If not yet created, creates array with all current wiper positions.
+	if (this->allWipers == NULL) 
+		this->allWipers = new uint16_t(this->chainedDevices);
+
+	return STATUS_OK;
+};
 
 /*!
  *	\details	Assigns Arduino pin for SPI operation of the AD5293 and sets the resistances for potentiometer operation (used in value calculations).
  *				SPI parameters (#m_commSettings) are also set within this function.
  */
-enum status_code AD5293Class::beginRheo(uint8_t pinCS, uint8_t nomResistance) {
+enum status_code AD5293Class::beginRheo(uint8_t pinCS, uint8_t nomResistance, SPIConnectionMode connMode = CONN_PARALLEL) {
 	this->m_bits = 10;
 
 	this->m_pinCS = pinCS;
@@ -86,9 +96,25 @@ enum status_code AD5293Class::beginRheo(uint8_t pinCS, uint8_t nomResistance) {
 	digitalWrite(this->m_pinCS, HIGH);
 	
 	this->m_commSettings = new SPISettings(500000, MSBFIRST, SPI_MODE1);
+	this->m_connMode = connMode;
+
+	this->chainedDevices += 1;
 
 	this->placeSDOinHighZ();
+
+	return STATUS_OK;
 };
+
+
+/*!
+ *	\details	Assigns Arduino pin for identification of read/write completion.
+ */
+void AD5293Class::setReadyPin(uint8_t pinRDY) {
+	this->m_pinRDY = pinRDY;
+	
+	// By default, the device is ready -> pull up.
+	pinMode(this->m_pinRDY, INPUT_PULLUP);
+}
 
 /*!
  *	\details	Assigns Arduino pin for hardware reset.
@@ -122,7 +148,7 @@ void AD5293Class::reset() {
 		digitalWrite(this->m_pinRST, HIGH);
 	}
 
-	this->write((uint16_t)1 << (this->m_bits - 1));
+	this->resetMidscale();
 
 	this->placeSDOinHighZ();
 }
@@ -148,6 +174,47 @@ void AD5293Class::placeSDOinHighZ() {
 	digitalWrite(this->m_pinCS, HIGH);
 	SPI.endTransaction();
 }
+
+/*!
+ *	
+ */
+enum status_code AD5293Class::resetMidscale() {
+	uint8_t count = 0;
+	uint16_t receivedData = 0;
+
+	switch (this->m_connMode) {
+		case CONN_PARALLEL:
+			this->write((uint16_t)1 << (this->m_bits - 1));
+			break;
+
+		case CONN_DAISYCHAIN:
+			SPI.beginTransaction(*this->m_commSettings);
+
+			digitalWrite(this->m_pinCS, LOW);
+			for (count = 0; count < this->chainedDevices; count++) {
+				receivedData = SPI.transfer16(this->combine(POT_CMD_WR_CTRL, POT_CTRL_WIPER_ALLOW_WRITE));
+			}
+			digitalWrite(this->m_pinCS, HIGH);
+
+			while (this->isReady() == false);
+			
+			digitalWrite(this->m_pinCS, LOW);
+			for (count = 0; count < this->chainedDevices; count++) {
+				receivedData = SPI.transfer16(this->combine(POT_CMD_WRITE, ((uint16_t)1 << (this->m_bits - 1))));
+			}
+			digitalWrite(this->m_pinCS, HIGH);
+			SPI.endTransaction();
+
+			while (this->isReady() == false);
+
+			break;
+
+		default:
+			;
+	}
+
+	return STATUS_OK;
+};
 
 /*!
  *	\details	See Table 9 in AD5293 datasheet.
@@ -209,7 +276,7 @@ enum status_code AD5293Class::writeVolts(float outVoltage) {
 /*!
  *	\details	Within the function, #m_wiper is updated based on the actual read-out from the device. 
  */
-uint16_t AD5293Class::getWiper() {
+uint16_t AD5293Class::readWiper() {
 	uint16_t receivedData = 0;
 	
 	SPI.beginTransaction(*this->m_commSettings);
@@ -232,6 +299,27 @@ uint16_t AD5293Class::getWiper() {
 	this->placeSDOinHighZ();
 	
 	return receivedData;
+};
+
+/*!
+ *	\details	Within the function, #m_wiper is updated based on a previous actual read-out for all daisy-chained devices. 
+ */
+uint16_t AD5293Class::getWiper() {
+	uint16_t rawWiper = 0;
+
+	switch (this->m_connMode) {
+		case CONN_DAISYCHAIN:
+			this->m_wiper = this->allWipers[this->m_chainOrder];
+
+		case CONN_PARALLEL:
+			rawWiper = this->m_wiper;
+			break;
+
+		default:
+			;
+	}
+	
+	return rawWiper;
 };
 
 /*!

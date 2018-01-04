@@ -26,6 +26,13 @@
   #include <status_codes.h>
 #endif
 
+/*!
+ *	\brief	Enumeration of connection modes.
+ */
+enum SPIConnectionMode {
+	CONN_PARALLEL,		//!< Converter operates as a single device (dedicated <tt>!CS</tt> pin).
+	CONN_DAISYCHAIN		//!< Converter operates as one of daisy-chained devices (shared <tt>!CS</tt> pin).
+};
 
 /*!
  *	\brief	Class for the AD5293 digital potentiometer.
@@ -34,6 +41,7 @@ class AD5293Class
 {
  private:
 	SPISettings* m_commSettings;	//!< SPI communication settings.
+	SPIConnectionMode m_connMode;	//!< Connection mode.
  
 	uint8_t m_pinCS;			//!< !SYNC (!CS) pin of the device (Arduino pin).
 	uint8_t m_pinRDY = 255;		//!< RDY pin of the device (Arduino pin).
@@ -47,9 +55,15 @@ class AD5293Class
 	float m_bottomResistance;	//!< Wiper resistance (ohms).
 	
 	uint8_t m_bits = 10;		//!< Number of wiper setting bits.
+
+	uint8_t m_chainOrder = 0;			//!< Order in chain of devices.
+	AD5293Class* previousADC = NULL;	//!< Pointer to previous device in chain.
+	AD5293Class* nextADC = NULL;		//!< Pointer to next device in chain.
 	
  protected:
-	
+
+ 	static uint8_t chainedDevices;	//!< Number of daisy-chained devices.
+ 	static uint16_t* allWipers;		//!< Array with all current wiper positions.
 
  public:
   
@@ -58,12 +72,13 @@ class AD5293Class
  *
  *	\param	pinCS		\c !SYNC pin number (Arduino pin).
  *	\param	refVoltage	Reference voltage (V).
+ *	\param	connMode	Multiple devices connection mode.
  *
  *	\note	Use this function if the reference voltage is symmetric and bipolar, e.g. -1.024 V to +1.024 V.
  *
  *	\returns	\see_status_code
  */ 
-enum status_code begin(uint8_t pinCS, float refVoltage);
+enum status_code begin(uint8_t pinCS, float refVoltage, SPIConnectionMode connMode);
 
 /*!
  *	\brief	Configures the potentiometer (two separate voltages).
@@ -71,24 +86,39 @@ enum status_code begin(uint8_t pinCS, float refVoltage);
  *	\param	pinCS				!SYNC pin number (Arduino pin).
  *	\param	refVoltageBottom	Lower reference voltage (V).
  *	\param	refVoltageTop		Upper reference voltage (V).
+ *	\param	connMode			Multiple devices connection mode.
  *
  *	\note	Use this function if the top and bottom reference voltage is unrelated, e.g. 0 to 4.096 V.
  *
  *	\returns	\see_status_code
  */ 
-enum status_code begin(uint8_t pinCS, float refVoltageBottom, float refVoltageTop);
+enum status_code begin(uint8_t pinCS, float refVoltageBottom, float refVoltageTop, SPIConnectionMode connMode);
 
 /*!
  *	\brief	Configures the potentiometer (rheostat).
  *
  *	\param	pinCS			\c !SYNC pin number (Arduino pin).
  *	\param	nomResistance	Nominal resistance (kiloohms).
+ *	\param	connMode		Multiple devices connection mode.
  *
  *	\note	Use this function if the potentiometer acts as a variable resistor in series.
  *
  *	\returns	\see_status_code
  */ 
-enum status_code beginRheo(uint8_t pinCS, uint8_t nomResistance);
+enum status_code beginRheo(uint8_t pinCS, uint8_t nomResistance, SPIConnectionMode connMode);
+
+/*!
+ *	\brief	Configures position in a chain of AD5293s.
+ *
+ *	\param	chainNo		Position in chain of converters (the device to which MOSI is connected is at <tt>0</tt>).
+ *	\param	prevADC		Pointer to instance of the preceding converter in chain.
+ *	\param	nextADC		Pointer to instance of the following converter in chain.
+ *
+ *	\note	Use <tt>NULL</tt> as appropriate pointers for the first and last converters in chain.
+ *
+ *	\returns	\see_status_code
+ */ 
+enum status_code configureChain(uint8_t chainNo, AD5293Class* prevADC, AD5293Class* nextADC);
 
 /*!
  *	\brief	Assigns Arduino pin to \c RDY function of AD5293.
@@ -116,12 +146,12 @@ void setResetPin(uint8_t pinRST);
  *
  *	\returns	\c RDY pin state if present, \c true otherwise.
  */
-boolean isReady();
+boolean isReady(void);
 
 /*!
  *	\brief	Performs hardware reset.
  */
-void reset();
+void reset(void);
 
 /*! 
  *	\brief	Combines command code and data.
@@ -136,7 +166,14 @@ uint16_t combine(uint8_t commandCode, uint16_t data);
 /*!
  *	\brief	Send command to switch \c SDO pin to high impedance.
  */
-void placeSDOinHighZ();
+void placeSDOinHighZ(void);
+
+/*!
+ *	\brief	Resets wiper to midscale.
+ *
+ *	\note	If in daisy-chain mode, sets all devices to midscale.
+ */
+enum status_code resetMidscale(void);
 
 /*!
  *	\brief	Sends the wiper setting as raw value.
@@ -166,25 +203,32 @@ enum status_code writeOhms(float outResistance);
 enum status_code writeVolts(float outVoltage);
 
 /*!
+ *	\brief	Reads wiper position from the device returns it.
+ *
+ *	\returns	Current wiper position (raw).
+ */
+uint16_t readWiper(void);
+
+/*!
  *	\brief	Returns current wiper position.
  *
  *	\returns	Current wiper position (raw).
  */
-uint16_t getWiper();
+uint16_t getWiper(void);
 
 /*!
  *	\brief	Returns current resistance value.
  *
  *	\returns	Current resistance value (ohms).
  */
-float getCurrentResistance();
+float getCurrentResistance(void);
 
 /*!
  *	\brief	Returns current voltage value.
  *
  *	\returns	Current voltage value (V).
  */
-float getCurrentVoltage();
+float getCurrentVoltage(void);
 
 };
 
