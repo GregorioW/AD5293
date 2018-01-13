@@ -24,7 +24,7 @@ enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltage, SPIConnecti
  *				SPI parameters (#m_commSettings) are also set within this function.
  */
 enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltageBottom, float refVoltageTop, SPIConnectionMode connMode = CONN_PARALLEL) {
-	this->m_bits = 10;
+	this->m_bits = POT_BITS;
 	
 	this->m_pinCS = pinCS;
 	this->m_bottomRefVoltage = refVoltageBottom;
@@ -37,7 +37,8 @@ enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltageBottom, float
 	this->m_commSettings = new SPISettings(500000, MSBFIRST, SPI_MODE1);
 	this->m_connMode = connMode;
 
-	this->chainedDevices += 1;
+	if (this->m_connMode == CONN_DAISYCHAIN)
+		this->chainedDevices += 1;
 
 	this->placeSDOinHighZ();
 
@@ -64,7 +65,7 @@ enum status_code AD5293Class::configureChain(uint8_t chainNo, AD5293Class* prevA
  *				SPI parameters (#m_commSettings) are also set within this function.
  */
 enum status_code AD5293Class::beginRheo(uint8_t pinCS, uint8_t nomResistance, SPIConnectionMode connMode = CONN_PARALLEL) {
-	this->m_bits = 10;
+	this->m_bits = POT_BITS;
 
 	this->m_pinCS = pinCS;
 	this->m_bottomResistance = POT_WIPER_RESISTANCE;
@@ -98,12 +99,21 @@ enum status_code AD5293Class::beginRheo(uint8_t pinCS, uint8_t nomResistance, SP
 	this->m_commSettings = new SPISettings(500000, MSBFIRST, SPI_MODE1);
 	this->m_connMode = connMode;
 
-	this->chainedDevices += 1;
+	if (this->m_connMode == CONN_DAISYCHAIN)
+		this->chainedDevices += 1;
 
 	this->placeSDOinHighZ();
 
 	return STATUS_OK;
 };
+
+/*!
+ *	\details	If \c SDO pin is not connected to the microcontroller, #m_useSDO should be set to \c false,
+ *	\details	so that incoming SPI data will not be stored as actual wiper settings. 
+ */
+void AD5293Class::useMISO(boolean isDataOutUsed) {
+	this->m_useMISO = isDataOutUsed;
+}
 
 
 /*!
@@ -133,7 +143,7 @@ boolean AD5293Class::isReady() {
 	if (this->m_pinRDY != 255) {
 		return ((digitalRead(m_pinRDY) == 1) ? true : false);
 	} else {
-		delay(10);
+		delay(1);
 		return true;
 	}
 }
@@ -164,15 +174,42 @@ uint16_t AD5293Class::combine(uint8_t command, uint16_t data) {
  *	\details	See Table 10 in AD5293 datasheet.
  */
 void AD5293Class::placeSDOinHighZ() {
-	SPI.beginTransaction(*this->m_commSettings);
-	digitalWrite(this->m_pinCS, LOW);
-	SPI.transfer16(POT_CMD_SDO_HIGHZ);
-	digitalWrite(this->m_pinCS, HIGH);
-	while (this->isReady() == false);
-	digitalWrite(this->m_pinCS, LOW);
-	SPI.transfer16(this->combine(POT_CMD_NOP, 0));
-	digitalWrite(this->m_pinCS, HIGH);
-	SPI.endTransaction();
+	uint8_t count = 0;
+
+	switch (this->m_connMode) {
+		case CONN_PARALLEL:
+			SPI.beginTransaction(*this->m_commSettings);
+			digitalWrite(this->m_pinCS, LOW);
+			SPI.transfer16(POT_CMD_SDO_HIGHZ);
+			digitalWrite(this->m_pinCS, HIGH);
+			while (this->isReady() == false);
+			digitalWrite(this->m_pinCS, LOW);
+			SPI.transfer16(this->combine(POT_CMD_NOP, 0));
+			digitalWrite(this->m_pinCS, HIGH);
+			SPI.endTransaction();
+			break;
+
+		case CONN_DAISYCHAIN:
+			SPI.beginTransaction(*this->m_commSettings);
+			digitalWrite(this->m_pinCS, LOW);
+			for (count = 0; count < this->chainedDevices; count++) {
+				if (count == this->m_chainOrder) {
+					SPI.transfer16(POT_CMD_SDO_HIGHZ);
+				} else {
+					SPI.transfer16(this->combine(POT_CMD_NOP, 0));
+				}
+			};
+			digitalWrite(this->m_pinCS, HIGH);
+			while (this->isReady() == false);
+			digitalWrite(this->m_pinCS, LOW);
+			for (count = 0; count < this->chainedDevices; SPI.transfer16(this->combine(POT_CMD_NOP, 0)), count++);
+			digitalWrite(this->m_pinCS, HIGH);
+			SPI.endTransaction();
+			break;
+
+		default:
+			;
+	}
 }
 
 /*!
@@ -206,6 +243,14 @@ enum status_code AD5293Class::resetMidscale() {
 			SPI.endTransaction();
 
 			while (this->isReady() == false);
+
+			if (this->m_useMISO) {
+				this->readWiper();
+			} else {
+				for (count = 0, receivedData = ((uint16_t)1 << (this->m_bits - 1));
+					 count < this->chainedDevices; 
+					 this->allWipers[count] = receivedData, count++);
+			}
 
 			break;
 
@@ -242,7 +287,7 @@ enum status_code AD5293Class::write(uint16_t wiperSetting) {
 
 	while (this->isReady() == false);
 
-	this->m_wiper = this->getWiper() & POT_DATA_Msk;
+	this->m_wiper = this->getWiper(false) & POT_DATA_Msk;
 	
 	return STATUS_OK;
 };
@@ -304,12 +349,18 @@ uint16_t AD5293Class::readWiper() {
 /*!
  *	\details	Within the function, #m_wiper is updated based on a previous actual read-out for all daisy-chained devices. 
  */
-uint16_t AD5293Class::getWiper() {
+uint16_t AD5293Class::getWiper(boolean iterate = false) {
 	uint16_t rawWiper = 0;
 
 	switch (this->m_connMode) {
 		case CONN_DAISYCHAIN:
 			this->m_wiper = this->allWipers[this->m_chainOrder];
+			if (iterate) {
+				if (this->previousADC)
+					this->previousADC->getWiper(true);
+				if (this->nextADC)
+					this->nextADC->getWiper(true);
+			}
 
 		case CONN_PARALLEL:
 			rawWiper = this->m_wiper;
@@ -326,7 +377,7 @@ uint16_t AD5293Class::getWiper() {
  *	\details	Read-out from #getWiper() function is recalculated according to #m_topResistance and #m_bottomResistance values.
  */
 float AD5293Class::getCurrentResistance() {
-	float wiper = float(this->getWiper());
+	float wiper = float(this->getWiper(false));
 	return (this->m_bottomResistance + (wiper * (this->m_topResistance- this->m_bottomResistance))/(1 << this->m_bits));
 };
 
@@ -334,7 +385,7 @@ float AD5293Class::getCurrentResistance() {
  *	\details	Read-out from #getWiper() function is recalculated according to #m_topRefVoltage and #m_bottomRefVoltage values.
  */
 float AD5293Class::getCurrentVoltage() {
-	float wiper = float(this->getWiper());
+	float wiper = float(this->getWiper(false));
 	return (this->m_bottomRefVoltage + (wiper * (this->m_topRefVoltage - this->m_bottomRefVoltage))/(1 << this->m_bits));
 };
 

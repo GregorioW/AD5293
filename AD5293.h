@@ -34,6 +34,9 @@ enum SPIConnectionMode {
 	CONN_DAISYCHAIN		//!< Converter operates as one of daisy-chained devices (shared <tt>!CS</tt> pin).
 };
 
+#define POT_BITS				(10u)		//!< Number of bits.
+#define POT_WIPER_RESISTANCE	(60.0)		//!< Wiper resistance (ohms).
+
 /*!
  *	\brief	Class for the AD5293 digital potentiometer.
  */
@@ -42,6 +45,7 @@ class AD5293Class
  private:
 	SPISettings* m_commSettings;	//!< SPI communication settings.
 	SPIConnectionMode m_connMode;	//!< Connection mode.
+	boolean m_useMISO = false;		//!< Indicates if data is sent from SDO to microcontroller MISO.
  
 	uint8_t m_pinCS;			//!< !SYNC (!CS) pin of the device (Arduino pin).
 	uint8_t m_pinRDY = 255;		//!< RDY pin of the device (Arduino pin).
@@ -54,7 +58,7 @@ class AD5293Class
 	float m_topResistance;		//!< Largest resistance (ohms).
 	float m_bottomResistance;	//!< Wiper resistance (ohms).
 	
-	uint8_t m_bits = 10;		//!< Number of wiper setting bits.
+	uint8_t m_bits = POT_BITS;	//!< Number of wiper setting bits.
 
 	uint8_t m_chainOrder = 0;			//!< Order in chain of devices.
 	AD5293Class* previousADC = NULL;	//!< Pointer to previous device in chain.
@@ -110,7 +114,7 @@ enum status_code beginRheo(uint8_t pinCS, uint8_t nomResistance, SPIConnectionMo
 /*!
  *	\brief	Configures position in a chain of AD5293s.
  *
- *	\param	chainNo		Position in chain of converters (the device to which MOSI is connected is at <tt>0</tt>).
+ *	\param	chainNo		Position in chain of converters (the device to which MOSI is connected is at the <b>last</b> position).
  *	\param	prevADC		Pointer to instance of the preceding converter in chain.
  *	\param	nextADC		Pointer to instance of the following converter in chain.
  *
@@ -119,6 +123,13 @@ enum status_code beginRheo(uint8_t pinCS, uint8_t nomResistance, SPIConnectionMo
  *	\returns	\see_status_code
  */ 
 enum status_code configureChain(uint8_t chainNo, AD5293Class* prevADC, AD5293Class* nextADC);
+
+/*!
+ *	\brief	Sets hardware usage of \c SDO pin.
+ *
+ *	\param	isDataOutUsed	Set to \c true if SPI data is read in the microcontroller via \c MISO pin.
+ */
+void useMISO(boolean isDataOutUsed);
 
 /*!
  *	\brief	Assigns Arduino pin to \c RDY function of AD5293.
@@ -212,9 +223,11 @@ uint16_t readWiper(void);
 /*!
  *	\brief	Returns current wiper position.
  *
+ *	\param	iterate		When daisy-chained, iterate over all devices (\c false by default).
+ *
  *	\returns	Current wiper position (raw).
  */
-uint16_t getWiper(void);
+uint16_t getWiper(boolean iterate);
 
 /*!
  *	\brief	Returns current resistance value.
@@ -251,11 +264,9 @@ float getCurrentVoltage(void);
 #define POT_CMD_SDO_HIGHZ		(0x8001u)	//!< \c SDO into high-Z state.
 
 // Other definitions
-#define POT_CMD_Pos				(0xAu)			//!< Command position in the serial data.
-#define POT_CMD_Msk				(0x3C00u)		//!< Command mask.
-#define POT_DATA_Msk			(0x03FFu)		//!< Wiper setting mask.
-
-#define POT_WIPER_RESISTANCE	(60.0)		//!< Wiper resistance (ohms).
+#define POT_CMD_Pos				(0xAu)		//!< Command position in the serial data.
+#define POT_CMD_Msk				(0x3C00u)	//!< Command mask.
+#define POT_DATA_Msk			(0x03FFu)	//!< Wiper setting mask.
 
 #endif
 
