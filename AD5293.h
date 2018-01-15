@@ -58,7 +58,7 @@ class AD5293Class
 	float m_topResistance;		//!< Largest resistance (ohms).
 	float m_bottomResistance;	//!< Wiper resistance (ohms).
 	
-	uint8_t m_bits = POT_BITS;	//!< Number of wiper setting bits.
+	const uint8_t m_bits = POT_BITS;	//!< Number of wiper setting bits.
 
 	uint8_t m_chainOrder = 0;			//!< Order in chain of devices.
 	AD5293Class* previousADC = NULL;	//!< Pointer to previous device in chain.

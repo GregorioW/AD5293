@@ -24,8 +24,6 @@ enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltage, SPIConnecti
  *				SPI parameters (#m_commSettings) are also set within this function.
  */
 enum status_code AD5293Class::begin(uint8_t pinCS, float refVoltageBottom, float refVoltageTop, SPIConnectionMode connMode = CONN_PARALLEL) {
-	this->m_bits = POT_BITS;
-	
 	this->m_pinCS = pinCS;
 	this->m_bottomRefVoltage = refVoltageBottom;
 	this->m_topRefVoltage = refVoltageTop;
@@ -65,8 +63,6 @@ enum status_code AD5293Class::configureChain(uint8_t chainNo, AD5293Class* prevA
  *				SPI parameters (#m_commSettings) are also set within this function.
  */
 enum status_code AD5293Class::beginRheo(uint8_t pinCS, uint8_t nomResistance, SPIConnectionMode connMode = CONN_PARALLEL) {
-	this->m_bits = POT_BITS;
-
 	this->m_pinCS = pinCS;
 	this->m_bottomResistance = POT_WIPER_RESISTANCE;
 
@@ -265,29 +261,59 @@ enum status_code AD5293Class::resetMidscale() {
  *	\details	See Table 9 in AD5293 datasheet.
  */
 enum status_code AD5293Class::write(uint16_t wiperSetting) {
-
+	uint8_t count = 0;
 	uint16_t receivedData = 0;
 
-	this->placeSDOinHighZ();
+	switch (this->m_connMode) {
+		case CONN_PARALLEL:
+			this->placeSDOinHighZ();
 
-	SPI.beginTransaction(*this->m_commSettings);
+			SPI.beginTransaction(*this->m_commSettings);
+			digitalWrite(this->m_pinCS, LOW);
+			receivedData = SPI.transfer16(this->combine(POT_CMD_WR_CTRL, POT_CTRL_WIPER_ALLOW_WRITE));
+			digitalWrite(this->m_pinCS, HIGH);
+			while (this->isReady() == false);
+		
+			digitalWrite(this->m_pinCS, LOW);
+			receivedData = SPI.transfer16(this->combine(POT_CMD_WRITE, wiperSetting));
+			digitalWrite(this->m_pinCS, HIGH);
+			SPI.endTransaction();
+			while (this->isReady() == false);
 
-	digitalWrite(this->m_pinCS, LOW);
-	
-	receivedData = SPI.transfer16(this->combine(POT_CMD_WR_CTRL, POT_CTRL_WIPER_ALLOW_WRITE));
-	digitalWrite(this->m_pinCS, HIGH);
+			this->m_wiper = this->getWiper(false) & POT_DATA_Msk;
+			break;
+		
+		case CONN_DAISYCHAIN:
+			SPI.beginTransaction(*this->m_commSettings);
 
-	while (this->isReady() == false);
-	
-	digitalWrite(this->m_pinCS, LOW);
-	receivedData = SPI.transfer16(this->combine(POT_CMD_WRITE, wiperSetting));
+			digitalWrite(this->m_pinCS, LOW);
+			for (count = 0; count < this->chainedDevices; count++) {
+				receivedData = SPI.transfer16(this->combine(POT_CMD_WR_CTRL, POT_CTRL_WIPER_ALLOW_WRITE));
+			}
+			digitalWrite(this->m_pinCS, HIGH);
+			while (this->isReady() == false);
+		
+			digitalWrite(this->m_pinCS, LOW);
+			for (count = 0; count < this->chainedDevices; 
+				 SPI.transfer16(this->combine(POT_CMD_NOP, 0x155)), count++) {
+				if (count == m_chainOrder) {
+					receivedData = SPI.transfer16(this->combine(POT_CMD_WRITE, wiperSetting));
+				} else {
+					continue;
+				}	
+			}
+			digitalWrite(this->m_pinCS, HIGH);
+			SPI.endTransaction();
 
-	digitalWrite(this->m_pinCS, HIGH);
-	SPI.endTransaction();
+			while (this->isReady() == false);
 
-	while (this->isReady() == false);
-
-	this->m_wiper = this->getWiper(false) & POT_DATA_Msk;
+			if (this->m_useMISO) {
+				this->readWiper();
+			} else {
+				this->m_wiper = wiperSetting;
+			}
+			break;
+	}
 	
 	return STATUS_OK;
 };
