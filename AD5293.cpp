@@ -280,7 +280,7 @@ enum status_code AD5293Class::write(uint16_t wiperSetting) {
 			SPI.endTransaction();
 			while (this->isReady() == false);
 
-			this->m_wiper = this->getWiper(false) & POT_DATA_Msk;
+			this->m_wiper = this->readWiper() & POT_DATA_Msk;
 			break;
 		
 		case CONN_DAISYCHAIN:
