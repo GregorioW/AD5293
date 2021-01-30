@@ -17,4 +17,4 @@ Daisy-chain connected devices can also be handled using **AD5293** library. *To 
 
 # Hardware compatibility
 Any Arduino device with SPI capabilities should be enough. Please remember, however, that you may need a free digital output line per each AD5293 (for the *!SYNC* pin).
-In my applications, I was controlling the AD5293 potentiometer from an Arduino Zero and an Arduino Nano.
+In my applications, I was controlling the AD5293 potentiometer from an Arduino Zero and an Arduino Micro.
